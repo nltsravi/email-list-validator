@@ -1,30 +1,34 @@
 /**
- * Google Apps Script: Strict User-Level Email Validator (100% Zero-Notification Guarantee)
+ * Google Apps Script Web App & Sheet Validator:
+ * Strict User-Level Email Validator (100% Zero-Notification Guarantee)
  *
- * Reads email addresses from a sheet named "emailids", validates both the domain
- * AND whether the specific user/mailbox is valid and active (even when the domain
- * itself is valid!), WITHOUT sending any email or Drive notification to the user.
- * Logs the results in a newly created sheet with the date and timestamp on every execution,
- * and prints real-time execution status to the Apps Script Execution Log (`Logger.log` & `console.log`)
- * as each email ID validation completes.
+ * Security Policy:
+ * - Only authenticated users belonging to `@tirwin.in` are permitted to access
+ *   the Web App UI or invoke any backend RPC function.
+ * - Supports importing email lists from ANY Google Doc or Google Sheet in the
+ *   user's Google Drive (or by pasting a Google Doc/Sheet URL/ID or raw text).
+ * - Processes Domain + User mailbox verification in batches of 100 without sending
+ *   any email to the validated addresses.
  */
 
 const CONFIG = {
-  SOURCE_SHEET_NAME: 'emailids',
-  EMAIL_COLUMN_INDEX: 1, // 1 = Column A
-  HAS_HEADER_ROW: true,  // Automatically skips row 1 if it is a header
+  ALLOWED_DOMAIN: 'tirwin.in',
+  BATCH_SIZE: 100,
 
-  // Strict mode: When true (recommended), an email is ONLY marked "Active" if the
-  // specific user mailbox is confirmed to exist (not just the domain!).
+  // For legacy standalone spreadsheet execution:
+  SOURCE_SHEET_NAME: 'emailids',
+  EMAIL_COLUMN_INDEX: 1,
+  HAS_HEADER_ROW: true,
+
+  // Strict mode: An email is ONLY marked "Active" if the specific user mailbox is confirmed to exist
   REQUIRE_USER_VERIFICATION_FOR_ACTIVE: true,
 
-  // Enable built-in silent user checks (No API key needed, sends zero emails)
-  ENABLE_MICROSOFT_USER_CHECK: true, // Checks Outlook/Hotmail/Live/Office365 custom domains
-  ENABLE_GOOGLE_USER_CHECK: true,    // Checks Gmail & Google Workspace domains via REST API with sendNotificationEmail=false
+  // Built-in silent user checks (No API key needed, sends zero emails)
+  ENABLE_MICROSOFT_USER_CHECK: true,
+  ENABLE_GOOGLE_USER_CHECK: true,
 
-  // Optional SMTP Handshake API for custom non-Google/non-Microsoft SMTP servers (Yahoo, Zoho, cPanel, custom MX):
-  // Supported values: 'NONE' | 'HUNTER' | 'ABSTRACT' | 'ZEROBOUNCE' | 'REOON'
-  // (You can also configure the API key from the sheet menu: Email Validator -> Configure SMTP API Key)
+  // Optional SMTP Handshake API for custom non-Google/non-Microsoft SMTP servers:
+  // 'NONE' | 'HUNTER' | 'ABSTRACT' | 'ZEROBOUNCE' | 'REOON'
   VERIFICATION_PROVIDER: 'NONE',
   API_KEY: ''
 };
@@ -41,11 +45,517 @@ function logStatus(message) {
 
 /**
  * Note for Apps Script OAuth Scope detection:
- * Keeping a commented reference to DriveApp.getRootFolder() ensures Apps Script grants the
- * Drive OAuth token used by ScriptApp.getOAuthToken() for the REST call with sendNotificationEmail=false.
+ * Ensures Apps Script grants Drive, Docs, and Sheets OAuth permissions required by the Web App.
  *//** @private */
-function _ensureDriveScope() {
+function _ensureScopes() {
   // DriveApp.getRootFolder();
+  // DocumentApp.getActiveDocument();
+  // SpreadsheetApp.getActiveSpreadsheet();
+}
+
+/**
+ * Retrieves runtime configuration property (checks ScriptProperties first, then CONFIG fallback).
+ *
+ * @param {string} key
+ * @param {*} fallbackValue
+ * @return {string}
+ */
+function getRuntimeSecretOrConfig(key, fallbackValue) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const val = props.getProperty(key);
+    if (val !== null && val !== undefined && String(val).trim() !== '') {
+      return String(val).trim();
+    }
+  } catch (e) {
+    // Fallback to CONFIG if PropertiesService is unavailable
+  }
+  return String(fallbackValue !== undefined ? fallbackValue : '');
+}
+
+/**
+ * Enforces that the current user is authenticated with a `@tirwin.in` account.
+ * Returns a session status object and throws an Error if `throwOnUnauthorized` is true.
+ *
+ * @param {boolean} throwOnUnauthorized
+ * @return {{authorized: boolean, email: string, domain: string, reason: string}}
+ */
+function verifyTirwinAccess(throwOnUnauthorized) {
+  const allowedDomain = getRuntimeSecretOrConfig('ALLOWED_DOMAIN', CONFIG.ALLOWED_DOMAIN).toLowerCase();
+  const activeEmail = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  const userEmail = activeEmail || effectiveEmail;
+
+  if (!userEmail || !userEmail.includes('@')) {
+    const msg = `Authentication required. Please sign in with your @${allowedDomain} Google Workspace account.`;
+    if (throwOnUnauthorized) throw new Error(msg);
+    return { authorized: false, email: '', domain: '', reason: msg };
+  }
+
+  const userDomain = userEmail.split('@')[1];
+  if (userDomain !== allowedDomain) {
+    const msg = `Access Denied: "${userEmail}" belongs to "@${userDomain}". Only "@${allowedDomain}" users are permitted.`;
+    logStatus(`[SECURITY] Blocked unauthorized access attempt by: ${userEmail}`);
+    if (throwOnUnauthorized) throw new Error(msg);
+    return { authorized: false, email: userEmail, domain: userDomain, reason: msg };
+  }
+
+  return {
+    authorized: true,
+    email: userEmail,
+    domain: userDomain,
+    reason: `Authenticated as ${userEmail}`
+  };
+}
+
+/**
+ * Web App HTTP GET Entry Point.
+ * Serves the Email Validator web application (embeddable in Google Sites or standalone).
+ */
+function doGet(e) {
+  const auth = verifyTirwinAccess(false);
+
+  const template = HtmlService.createTemplateFromFile('Index');
+  template.authJson = JSON.stringify(auth);
+  template.allowedDomain = CONFIG.ALLOWED_DOMAIN;
+
+  return template
+    .evaluate()
+    .setTitle('Tirwin Email List Validator')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * Web App RPC: Returns current authenticated session info and SMTP configuration status.
+ */
+function getWebAppSessionInfo() {
+  const auth = verifyTirwinAccess(false);
+  let smtpProvider = 'NONE';
+  if (auth.authorized) {
+    const cfg = getSmtpApiConfig();
+    smtpProvider = cfg.provider && cfg.apiKey ? cfg.provider : 'NONE';
+  }
+  return {
+    authorized: auth.authorized,
+    email: auth.email,
+    domain: auth.domain,
+    reason: auth.reason,
+    allowedDomain: CONFIG.ALLOWED_DOMAIN,
+    batchSize: CONFIG.BATCH_SIZE,
+    smtpProvider: smtpProvider
+  };
+}
+
+/**
+ * Web App RPC: Lists recent Google Docs, Google Sheets, and Text/CSV files from the user's Drive
+ * so the user can pick any document to extract email lists from.
+ *
+ * @param {string} searchQuery Optional search keyword
+ * @return {Array<{id: string, name: string, type: string, updated: string, url: string}>}
+ */
+function listRecentUserDocsAndSheets(searchQuery) {
+  const auth = verifyTirwinAccess(true);
+  logStatus(`[WEBAPP] User ${auth.email} listing Google Docs/Sheets (search="${searchQuery || ''}")`);
+
+  const filesList = [];
+  const safeQuery = String(searchQuery || '').replace(/'/g, "\\'").trim();
+
+  let q =
+    "(mimeType = 'application/vnd.google-apps.document' or " +
+    "mimeType = 'application/vnd.google-apps.spreadsheet' or " +
+    "mimeType = 'text/plain' or mimeType = 'text/csv') and trashed = false";
+
+  if (safeQuery) {
+    q += ` and title contains '${safeQuery}'`;
+  }
+
+  const iterator = DriveApp.searchFiles(q);
+  const timeZone = Session.getScriptTimeZone() || 'Asia/Kolkata';
+
+  while (iterator.hasNext() && filesList.length < 40) {
+    const file = iterator.next();
+    const mime = file.getMimeType();
+    let typeLabel = 'Google Doc';
+    if (mime === 'application/vnd.google-apps.spreadsheet') {
+      typeLabel = 'Google Sheet';
+    } else if (mime === 'text/csv') {
+      typeLabel = 'CSV File';
+    } else if (mime === 'text/plain') {
+      typeLabel = 'Text File';
+    }
+
+    filesList.push({
+      id: file.getId(),
+      name: file.getName(),
+      type: typeLabel,
+      mimeType: mime,
+      updated: Utilities.formatDate(file.getLastUpdated(), timeZone, 'yyyy-MM-dd HH:mm'),
+      url: file.getUrl()
+    });
+  }
+
+  return filesList;
+}
+
+/**
+ * Web App RPC: Extracts all candidate email entries from a selected Google Doc, Google Sheet,
+ * or Text/CSV file (accepted by File ID or full Google Docs/Sheets URL).
+ *
+ * Designed to preserve candidate strings that have internal whitespace or special character typos
+ * (such as "john doe@company.com" or "user#1@domain.com") so the UI initial vetting stage can
+ * display and flag them accurately.
+ *
+ * @param {string} docUrlOrId
+ * @return {{fileName: string, fileType: string, rawCandidates: Array<string>, totalExtracted: number}}
+ */
+function extractEmailsFromGoogleDocOrSheet(docUrlOrId) {
+  const auth = verifyTirwinAccess(true);
+  const input = String(docUrlOrId || '').trim();
+  if (!input) {
+    throw new Error('Please select a file or enter a valid Google Doc / Google Sheet URL or File ID.');
+  }
+
+  const fileId = extractDriveFileId(input);
+  let file;
+  try {
+    file = DriveApp.getFileById(fileId);
+  } catch (err) {
+    throw new Error(`Unable to open file (ID: ${fileId}). Please check that the file exists and you have permission to view it.`);
+  }
+
+  const mimeType = file.getMimeType();
+  const fileName = file.getName();
+  let rawText = '';
+  let fileType = 'Google Doc';
+
+  logStatus(`[WEBAPP] User ${auth.email} extracting email list from "${fileName}" (${mimeType})`);
+
+  if (mimeType === 'application/vnd.google-apps.document') {
+    fileType = 'Google Doc';
+    const doc = DocumentApp.openById(fileId);
+    const bodyText = doc.getBody() ? doc.getBody().getText() : '';
+    const headerText = doc.getHeader() ? doc.getHeader().getText() : '';
+    const footerText = doc.getFooter() ? doc.getFooter().getText() : '';
+    rawText = [headerText, bodyText, footerText].join('\n');
+  } else if (mimeType === 'application/vnd.google-apps.spreadsheet') {
+    fileType = 'Google Sheet';
+    const ss = SpreadsheetApp.openById(fileId);
+    const targetSheet = ss.getSheetByName(CONFIG.SOURCE_SHEET_NAME) || ss.getSheets()[0];
+    const values = targetSheet.getDataRange().getDisplayValues();
+    const cellLines = [];
+    for (let r = 0; r < values.length; r++) {
+      for (let c = 0; c < values[r].length; c++) {
+        const cellVal = String(values[r][c] || '');
+        if (cellVal.trim() !== '') {
+          cellLines.push(cellVal);
+        }
+      }
+    }
+    rawText = cellLines.join('\n');
+  } else {
+    fileType = 'Text / CSV File';
+    rawText = file.getBlob().getDataAsString('UTF-8');
+  }
+
+  const rawCandidates = parseEmailCandidatesFromText(rawText);
+  logStatus(`[WEBAPP] Extracted ${rawCandidates.length} email candidate(s) from "${fileName}".`);
+
+  return {
+    fileName: fileName,
+    fileType: fileType,
+    rawCandidates: rawCandidates,
+    totalExtracted: rawCandidates.length
+  };
+}
+
+/**
+ * Extracts a Google Drive File ID from a full Google Docs/Sheets/Drive URL or returns the raw ID.
+ *
+ * @param {string} urlOrId
+ * @return {string}
+ */
+function extractDriveFileId(urlOrId) {
+  const trimmed = String(urlOrId || '').trim();
+  const dMatch = trimmed.match(/\/d\/([a-zA-Z0-9-_]{15,})/);
+  if (dMatch && dMatch[1]) return dMatch[1];
+
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9-_]{15,})/);
+  if (idParamMatch && idParamMatch[1]) return idParamMatch[1];
+
+  return trimmed;
+}
+
+/**
+ * Parses candidate email strings from unstructured or structured Google Doc / Sheet text.
+ * Preserves whitespace or invalid special character anomalies on lines/items intended as emails
+ * so initial vetting can catch and highlight them.
+ *
+ * @param {string} rawText
+ * @return {Array<string>}
+ */
+function parseEmailCandidatesFromText(rawText) {
+  if (!rawText) return [];
+
+  // Split by newlines, commas, semicolons, or tabs
+  const chunks = String(rawText).split(/[\r\n,;|\t]+/);
+  const candidates = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const rawChunk = chunks[i];
+    if (!rawChunk || rawChunk.trim() === '') continue;
+
+    const trimmed = rawChunk.trim();
+
+    // Skip common header labels if they don't contain '@'
+    if (
+      !trimmed.includes('@') &&
+      /^(email|email\s*id|email\s*ids|e-mail|email\s*address|sl\.?\s*no|s\.?\s*no|name|status)$/i.test(trimmed)
+    ) {
+      continue;
+    }
+
+    // If the line is a short single entry (e.g. a bullet item or table cell), keep it intact
+    // (including any leading/trailing/internal spaces) so basic vetting can flag whitespace/format issues.
+    const wordCount = trimmed.split(/\s+/).length;
+    if (trimmed.includes('@') && wordCount <= 3 && trimmed.length <= 120) {
+      // Strip common bullet markers or angle brackets if present, while preserving whitespace checks
+      const cleaned = rawChunk.replace(/^[\s•*\-–—>]+(?=\S)/, '').replace(/^[<("']+|[>)"']+$/g, '');
+      candidates.push(cleaned);
+    } else if (trimmed.includes('@')) {
+      // Long paragraph in a Google Doc: extract all email-like tokens containing '@'
+      const matches = trimmed.match(/[^\s<>"',;()[\]]+@[^\s<>"',;()[\]]+/g);
+      if (matches) {
+        for (let m = 0; m < matches.length; m++) {
+          candidates.push(matches[m].replace(/[.,;:!?]+$/, ''));
+        }
+      }
+    } else if (wordCount === 1 && trimmed.length >= 3 && trimmed.includes('.')) {
+      // Single token with a dot but missing '@' (e.g. "johndoe.gmail.com") -> include so format check catches missing '@'
+      candidates.push(rawChunk);
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Web App RPC: Validates a batch of up to 100 email addresses for Domain + User availability
+ * without sending any email to the users, and logs progress to the Apps Script execution log.
+ *
+ * Also optionally logs the results to a new timestamped sheet if the script is bound to a spreadsheet.
+ *
+ * @param {Array<string>} emailBatch Array of pre-vetted email strings (max 100 per call)
+ * @param {number} batchNumber 1-based batch index for logging
+ * @param {number} totalBatches Total number of batches
+ * @return {Array<Object>} Array of detailed validation result objects
+ */
+function validateEmailBatchWeb(emailBatch, batchNumber, totalBatches) {
+  const auth = verifyTirwinAccess(true);
+
+  if (!Array.isArray(emailBatch)) {
+    throw new Error('Invalid email batch payload.');
+  }
+
+  const batch = emailBatch.slice(0, CONFIG.BATCH_SIZE);
+  const bNum = batchNumber || 1;
+  const bTotal = totalBatches || 1;
+
+  logStatus('--------------------------------------------------------------------------------');
+  logStatus(`[BATCH ${bNum}/${bTotal}] User ${auth.email} starting deep validation for ${batch.length} email(s)...`);
+
+  const domainCache = {};
+  const probeFileId = getOrCreateSilentProbeFileId();
+  const timeZone = Session.getScriptTimeZone() || 'Asia/Kolkata';
+  const results = [];
+
+  for (let i = 0; i < batch.length; i++) {
+    const email = String(batch[i] || '').trim();
+    const startMs = Date.now();
+    const checkedAt = Utilities.formatDate(new Date(), timeZone, 'yyyy-MM-dd HH:mm:ss');
+
+    logStatus(`[Batch ${bNum}/${bTotal} - ${i + 1}/${batch.length}] Validating "${email}"...`);
+    const validation = validateSingleEmail(email, domainCache, probeFileId);
+    const elapsedMs = Date.now() - startMs;
+
+    const record = {
+      email: email,
+      status: validation.status,
+      isActive: Boolean(validation.isActive),
+      domainValid: Boolean(validation.domainValid),
+      userActive: validation.userActive,
+      method: validation.method,
+      syntaxValid: Boolean(validation.syntaxValid),
+      isDisposable: Boolean(validation.isDisposable),
+      primaryMx: validation.primaryMx || 'N/A',
+      mxRecords: validation.mxRecords || [],
+      reason: validation.reason,
+      checkedAt: checkedAt,
+      elapsedMs: elapsedMs
+    };
+
+    results.push(record);
+
+    logStatus(
+      `[Batch ${bNum}/${bTotal} - ${i + 1}/${batch.length}] COMPLETED: "${email}" | ` +
+      `Status: ${record.status} | Active: ${record.isActive ? 'Yes' : 'No'} | ` +
+      `Domain Valid: ${record.domainValid ? 'Yes' : 'No'} | User Active: ${record.userActive} | ` +
+      `Method: ${record.method} | MX: ${record.primaryMx} (${elapsedMs} ms)`
+    );
+  }
+
+  logStatus(`[BATCH ${bNum}/${bTotal}] Completed ${results.length} email(s).`);
+  return results;
+}
+
+/**
+ * Web App RPC: Saves the completed validation run to a newly created date-and-timestamped
+ * sheet tab if bound to a Google Sheet (or creates/updates a master log spreadsheet in Drive).
+ *
+ * @param {Array<Object>} allResults
+ * @return {{loggedToSheet: boolean, sheetName: string, spreadsheetUrl: string}}
+ */
+function saveValidationRunToTimestampedSheet(allResults) {
+  const auth = verifyTirwinAccess(true);
+  if (!Array.isArray(allResults) || allResults.length === 0) {
+    return { loggedToSheet: false, sheetName: '', spreadsheetUrl: '' };
+  }
+
+  try {
+    let ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      const props = PropertiesService.getScriptProperties();
+      const savedSsId = props.getProperty('VALIDATOR_LOG_SPREADSHEET_ID');
+      if (savedSsId) {
+        try {
+          ss = SpreadsheetApp.openById(savedSsId);
+        } catch (e) {
+          ss = null;
+        }
+      }
+      if (!ss) {
+        ss = SpreadsheetApp.create('Tirwin Email Validation Logs');
+        props.setProperty('VALIDATOR_LOG_SPREADSHEET_ID', ss.getId());
+      }
+    }
+
+    const timeZone = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Kolkata';
+    const executionTime = new Date();
+    const formattedSheetTimestamp = Utilities.formatDate(executionTime, timeZone, 'yyyy-MM-dd_HH-mm-ss');
+
+    let resultSheetName = `Validated_${formattedSheetTimestamp}`;
+    if (ss.getSheetByName(resultSheetName)) {
+      resultSheetName += `_${executionTime.getMilliseconds()}`;
+    }
+    const resultSheet = ss.insertSheet(resultSheetName);
+
+    const headers = [
+      'Email ID',
+      'Overall Status',
+      'Is Active',
+      'Basic Vetting Passed',
+      'Domain Valid',
+      'User Active in Domain',
+      'Verification Method',
+      'Disposable Domain',
+      'Primary Mail Server (MX)',
+      'Validation Details',
+      'Validated By',
+      'Validated At'
+    ];
+    const outputRows = [headers];
+
+    for (let i = 0; i < allResults.length; i++) {
+      const r = allResults[i];
+      outputRows.push([
+        r.email || r.rawEmail || '',
+        r.status || '',
+        r.isActive ? 'Yes' : 'No',
+        r.basicValid ? 'Yes' : 'No',
+        r.domainValid ? 'Yes' : 'No',
+        r.userActive || 'No',
+        r.method || '',
+        r.isDisposable ? 'Yes' : 'No',
+        r.primaryMx || 'N/A',
+        r.reason || '',
+        auth.email,
+        r.checkedAt || Utilities.formatDate(executionTime, timeZone, 'yyyy-MM-dd HH:mm:ss')
+      ]);
+    }
+
+    resultSheet.getRange(1, 1, outputRows.length, headers.length).setValues(outputRows);
+    formatResultSheet(resultSheet, outputRows.length, headers.length);
+
+    logStatus(`[SHEET LOG] Saved ${allResults.length} validated email(s) to new sheet "${resultSheetName}".`);
+    return {
+      loggedToSheet: true,
+      sheetName: resultSheetName,
+      spreadsheetUrl: ss.getUrl()
+    };
+  } catch (err) {
+    logStatus(`[WARN] Could not log run to Google Sheet: ${err.message}`);
+    return { loggedToSheet: false, sheetName: '', spreadsheetUrl: '' };
+  }
+}
+
+/**
+ * Web App RPC: Saves an optional external SMTP API provider & key from the Web UI.
+ *
+ * @param {string} provider
+ * @param {string} apiKey
+ */
+function saveSmtpApiConfigWeb(provider, apiKey) {
+  const auth = verifyTirwinAccess(true);
+  const props = PropertiesService.getScriptProperties();
+  const cleanProvider = String(provider || 'NONE').trim().toUpperCase();
+  const cleanKey = String(apiKey || '').trim();
+
+  if (cleanProvider === 'NONE' || !cleanKey) {
+    props.deleteProperty('VERIFICATION_PROVIDER');
+    props.deleteProperty('API_KEY');
+    logStatus(`[CONFIG] User ${auth.email} cleared external SMTP API configuration.`);
+    return { provider: 'NONE' };
+  }
+
+  props.setProperty('VERIFICATION_PROVIDER', cleanProvider);
+  props.setProperty('API_KEY', cleanKey);
+  logStatus(`[CONFIG] User ${auth.email} configured SMTP API provider: ${cleanProvider}`);
+  return { provider: cleanProvider };
+}
+
+/**
+ * Returns a valid Google Drive file ID owned/editable by the user so the Drive v3 REST API
+ * can test permissions with `?sendNotificationEmail=false` (never uses DriveApp.addViewer).
+ *
+ * @return {string|null}
+ */
+function getOrCreateSilentProbeFileId() {
+  try {
+    const activeSs = SpreadsheetApp.getActiveSpreadsheet();
+    if (activeSs) return activeSs.getId();
+  } catch (e) {
+    // Running as standalone web app
+  }
+
+  try {
+    const props = PropertiesService.getUserProperties();
+    const cachedId = props.getProperty('SILENT_REST_PROBE_FILE_ID');
+    if (cachedId) {
+      try {
+        const f = DriveApp.getFileById(cachedId);
+        if (!f.isTrashed()) return cachedId;
+      } catch (e) {
+        // File was deleted; recreate below
+      }
+    }
+
+    const newFile = DriveApp.createFile('_tirwin_email_validator_anchor.txt', 'Internal anchor for silent REST lookup.');
+    props.setProperty('SILENT_REST_PROBE_FILE_ID', newFile.getId());
+    return newFile.getId();
+  } catch (err) {
+    logStatus(`[WARN] Unable to obtain probe file ID for Drive REST lookup: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -61,10 +571,10 @@ function onOpen() {
 }
 
 /**
- * Interactive prompt allowing the user to save an SMTP Verifier API key in ScriptProperties
- * so custom non-Google/non-Microsoft domains can also verify individual mailboxes via SMTP RCPT TO.
+ * Interactive prompt allowing the user to save an SMTP Verifier API key in ScriptProperties.
  */
 function configureSmtpApiPrompt() {
+  verifyTirwinAccess(true);
   const ui = SpreadsheetApp.getUi();
   const props = PropertiesService.getScriptProperties();
 
@@ -96,14 +606,17 @@ function configureSmtpApiPrompt() {
 }
 
 /**
- * Main function to read emails from "emailids", strictly validate whether the user is
- * valid and active in the domain without sending any email, log execution progress for
- * every email ID, and write results to a new date-and-timestamped sheet.
+ * Standalone Sheet Function: Reads emails from "emailids", strictly validates whether the user is
+ * valid and active in the domain without sending any email, logs execution progress for
+ * every email ID, and writes results to a new date-and-timestamped sheet.
  */
 function validateEmailList() {
   const startTimeMs = Date.now();
   logStatus('================================================================================');
   logStatus('[START] Email List Validation Execution Started');
+
+  const auth = verifyTirwinAccess(true);
+  logStatus(`[AUTH] Verified user: ${auth.email}`);
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName(CONFIG.SOURCE_SHEET_NAME);
@@ -123,13 +636,11 @@ function validateEmailList() {
     return;
   }
 
-  // Read column data
   const rawValues = sourceSheet
     .getRange(1, CONFIG.EMAIL_COLUMN_INDEX, lastRow, 1)
     .getValues()
     .map(row => String(row[0]).trim());
 
-  // Automatically skip header row if configured and first cell doesn't look like an email
   let startIndex = 0;
   if (CONFIG.HAS_HEADER_ROW && rawValues.length > 0 && !rawValues[0].includes('@')) {
     logStatus(`[INFO] Skipping header row: "${rawValues[0]}"`);
@@ -143,14 +654,15 @@ function validateEmailList() {
     return;
   }
 
-  logStatus(`[INFO] Found ${emails.length} email ID(s) to validate.`);
+  // Sort the email list alphabetically
+  emails.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  logStatus(`[INFO] Found and sorted ${emails.length} email ID(s) to validate.`);
 
   const domainCache = {};
   const timeZone = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'UTC';
   const executionTime = new Date();
   const formattedSheetTimestamp = Utilities.formatDate(executionTime, timeZone, 'yyyy-MM-dd_HH-mm-ss');
 
-  // Create a new sheet with Date and Timestamp every time the script executes
   let resultSheetName = `Validated_${formattedSheetTimestamp}`;
   if (ss.getSheetByName(resultSheetName)) {
     resultSheetName += `_${executionTime.getMilliseconds()}`;
@@ -159,7 +671,6 @@ function validateEmailList() {
   logStatus(`[INFO] Created new output sheet: "${resultSheetName}"`);
   logStatus('--------------------------------------------------------------------------------');
 
-  // Use the active spreadsheet's own file ID for REST API permission probes with sendNotificationEmail=false
   const probeFileId = ss.getId();
 
   const headers = [
@@ -214,7 +725,6 @@ function validateEmailList() {
       checkedAt
     ]);
 
-    // Log completion details for this email ID
     logStatus(
       `${progressPrefix} COMPLETED: "${email}" | Status: ${validation.status} | ` +
       `Is Active: ${validation.isActive ? 'Yes' : 'No'} | Domain Valid: ${validation.domainValid ? 'Yes' : 'No'} | ` +
@@ -226,7 +736,6 @@ function validateEmailList() {
   logStatus('--------------------------------------------------------------------------------');
   logStatus(`[INFO] Writing ${outputRows.length - 1} validated record(s) to sheet "${resultSheetName}"...`);
 
-  // Write results in bulk
   resultSheet.getRange(1, 1, outputRows.length, headers.length).setValues(outputRows);
   formatResultSheet(resultSheet, outputRows.length, headers.length);
 
@@ -258,13 +767,19 @@ function validateSingleEmail(email, domainCache, probeFileId) {
     syntaxValid: false,
     isDisposable: false,
     primaryMx: '',
+    mxRecords: [],
     reason: ''
   };
 
-  // 1. Syntax Validation (RFC 5322 compliant check)
+  // 1. Basic & RFC 5322 Syntax Validation (whitespace, special chars, local-part, domain format)
+  if (/\s/.test(email)) {
+    result.reason = 'Contains invalid whitespace characters';
+    return result;
+  }
+
   const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
   if (!emailRegex.test(email)) {
-    result.reason = 'Invalid email syntax format';
+    result.reason = 'Invalid email syntax or disallowed special characters';
     return result;
   }
 
@@ -298,6 +813,7 @@ function validateSingleEmail(email, domainCache, probeFileId) {
   const dnsInfo = domainCache[domain];
 
   result.primaryMx = dnsInfo.primaryMx;
+  result.mxRecords = dnsInfo.mxList || [];
   result.method = 'DNS MX Lookup';
 
   if (!dnsInfo.domainExists) {
@@ -319,7 +835,7 @@ function validateSingleEmail(email, domainCache, probeFileId) {
   const userCheck = verifyUserActiveInValidDomain(email, domain, dnsInfo, domainCache, probeFileId);
 
   result.method = userCheck.method;
-  result.userActive = userCheck.userActive; // 'Yes' | 'No' | 'No (Suspended)' | 'Unverified (Catch-All)' | 'Unverified (Needs SMTP API)'
+  result.userActive = userCheck.userActive;
   result.isActive = CONFIG.REQUIRE_USER_VERIFICATION_FOR_ACTIVE
     ? userCheck.userActive === 'Yes'
     : Boolean(userCheck.isActive);
@@ -381,14 +897,13 @@ function verifyUserActiveInValidDomain(email, domain, dnsInfo, domainCache, prob
     }
   }
 
-  // 5. If the domain is valid (e.g. Yahoo, Zoho, custom cPanel SMTP), but the user could not be
-  // verified without an SMTP handshake API key, do NOT falsely mark the user as Active.
+  // 5. Fallback if domain is valid (e.g. Yahoo, Zoho, custom cPanel SMTP), but no SMTP API key is configured
   return {
     isActive: false,
     userActive: 'Unverified (Needs SMTP API)',
     status: 'Domain Valid / User Unverified',
     method: 'DNS MX Only (No SMTP Probe)',
-    reason: `Domain "${domain}" is valid (MX: ${dnsInfo.primaryMx}), but verifying user "${email}" on this mail server requires an SMTP Verifier API key (Email Validator -> Configure SMTP API Key)`
+    reason: `Domain "${domain}" is valid (MX: ${dnsInfo.primaryMx}), but verifying user "${email}" on this mail server requires an SMTP Verifier API key`
   };
 }
 
@@ -411,7 +926,6 @@ function checkMicrosoftUserExistsStrict(email, domain, domainCache) {
     const userCode = queryMicrosoftCredentialType(email);
     if (userCode === null) return null;
 
-    // IfExistsResult === 1 means the user definitely does NOT exist even though the domain is valid
     if (userCode === 1) {
       return {
         isActive: false,
@@ -422,8 +936,6 @@ function checkMicrosoftUserExistsStrict(email, domain, domainCache) {
       };
     }
 
-    // IfExistsResult === 0, 5, or 6 indicates the user exists.
-    // Run a one-time canary test on custom domains to ensure the domain doesn't return 0 for every random user.
     if (userCode === 0 || userCode === 5 || userCode === 6) {
       if (domain !== 'outlook.com' && domain !== 'hotmail.com' && domain !== 'live.com' && domain !== 'msn.com') {
         if (typeof domainCache[domain].msCanaryAcceptsAll === 'undefined') {
@@ -459,7 +971,6 @@ function checkMicrosoftUserExistsStrict(email, domain, domainCache) {
 
 /**
  * Helper to query Microsoft's silent GetCredentialType endpoint.
- * Returns IfExistsResult integer (0 = exists, 1 = does not exist) or null on error.
  */
 function queryMicrosoftCredentialType(email) {
   const url = 'https://login.microsoftonline.com/common/GetCredentialType';
@@ -634,7 +1145,8 @@ function checkDomainDns(domain) {
     domainExists: false,
     hasMx: false,
     mxCount: 0,
-    primaryMx: ''
+    primaryMx: '',
+    mxList: []
   };
 
   try {
@@ -642,7 +1154,6 @@ function checkDomainDns(domain) {
     const mxResponse = UrlFetchApp.fetch(mxUrl, { muteHttpExceptions: true });
     const mxData = JSON.parse(mxResponse.getContentText());
 
-    // Status 3 = NXDOMAIN (Non-Existent Domain)
     if (mxData.Status === 3) {
       return dnsResult;
     }
@@ -665,6 +1176,7 @@ function checkDomainDns(domain) {
         dnsResult.hasMx = true;
         dnsResult.mxCount = mxRecords.length;
         dnsResult.primaryMx = mxRecords[0].exchange;
+        dnsResult.mxList = mxRecords.map(r => `${r.priority} ${r.exchange}`);
       }
     }
   } catch (err) {
@@ -699,7 +1211,6 @@ function getSmtpApiConfig() {
 
 /**
  * Mailbox-level SMTP handshake (`RCPT TO`) verification via external API.
- * Strictly verifies that the individual user exists and is not on an unverifiable catch-all.
  */
 function checkMailboxWithSmtpApi(email, provider, apiKey) {
   try {
@@ -792,8 +1303,7 @@ function formatResultSheet(sheet, totalRows, totalCols) {
   sheet.setFrozenRows(1);
 
   if (totalRows > 1) {
-    // Apply conditional formatting to Overall Status (Col B), Is Active (Col C), Domain Valid (Col D), User Active in Domain (Col E)
-    const statusRange = sheet.getRange(2, 2, totalRows - 1, 4);
+    const statusRange = sheet.getRange(2, 2, totalRows - 1, 5);
 
     const activeRule = SpreadsheetApp.newConditionalFormatRule()
       .whenTextEqualTo('Active')

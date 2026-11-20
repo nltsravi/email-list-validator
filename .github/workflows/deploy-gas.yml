@@ -1,0 +1,53 @@
+# Google Apps Script Auto-Deployment Pipeline
+#
+# Secret Resolution:
+# - `deploy.sh` first looks for a local `.env` file.
+# - When `.env` is absent (such as in GitHub Actions CI), `deploy.sh` automatically
+#   reads secrets from GitHub Repository Secrets passed via environment variables below.
+#
+# Required GitHub Repository Secrets:
+#   1. CLASPRC_JSON          : Full JSON contents of ~/.clasprc.json (from `npx @google/clasp login`)
+#   2. SCRIPT_ID             : Your Google Apps Script Project ID
+# Optional GitHub Repository Secrets:
+#   3. DEPLOYMENT_ID         : Existing Web App Deployment ID (AKfycb...) to update in-place
+#   4. PARENT_SHEET_ID       : Optional parent Google Sheet ID
+#   5. ALLOWED_DOMAIN        : Allowed Google Workspace domain (defaults to "tirwin.in")
+#   6. BATCH_SIZE            : Validation batch size (defaults to "100")
+#   7. VERIFICATION_PROVIDER : External SMTP API provider (HUNTER, ABSTRACT, ZEROBOUNCE, REOON, or NONE)
+#   8. SMTP_API_KEY          : External SMTP API key
+
+name: Deploy Google Apps Script Web App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies (@google/clasp)
+        run: npm install --no-audit --no-fund
+
+      - name: Run Auto-Deployment (.env fallback to Git Secrets)
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+          PARENT_SHEET_ID: ${{ secrets.PARENT_SHEET_ID }}
+          ALLOWED_DOMAIN: ${{ secrets.ALLOWED_DOMAIN || 'tirwin.in' }}
+          BATCH_SIZE: ${{ secrets.BATCH_SIZE || '100' }}
+          VERIFICATION_PROVIDER: ${{ secrets.VERIFICATION_PROVIDER || 'NONE' }}
+          SMTP_API_KEY: ${{ secrets.SMTP_API_KEY }}
+        run: ./deploy.sh --desc "GitHub Actions Auto-Deploy (${GITHUB_SHA::7})"

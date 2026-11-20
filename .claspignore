@@ -1,0 +1,5 @@
+# Ignore deployment scripts and local config when pushing to Google Apps Script
+**/**
+!Code.gs
+!Index.html
+!appsscript.json

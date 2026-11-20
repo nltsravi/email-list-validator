@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tirwin Email List Validator</title>
+  <!-- SheetJS (xlsx) & jsPDF + AutoTable for client-side CSV, Excel (.xlsx), and PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #1a73e8;
+      --primary-dark: #1557b0;
+      --primary-light: #e8f0fe;
+      --success: #137333;
+      --success-bg: #e6f4ea;
+      --danger: #c5221f;
+      --danger-bg: #fce8e6;
+      --warning: #b06000;
+      --warning-bg: #fef7e0;
+      --bg: #f8fafd;
+      --card: #ffffff;
+      --border: #dadce0;
+      --text: #202124;
+      --text-muted: #5f6368;
+      --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding-bottom: 48px;
+    }
+
+    /* Top Navigation Bar */
+    .navbar {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .brand-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .auth-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid #ceead6;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .auth-pill.unauthorized {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-color: #fad2cf;
+    }
+
+    .container {
+      max-width: 1240px;
+      margin: 24px auto;
+      padding: 0 20px;
+    }
+
+    /* Unauthorized Gate */
+    .gate-card {
+      max-width: 580px;
+      margin: 64px auto;
+      background: var(--card);
+      border: 1px solid #fad2cf;
+      border-radius: 16px;
+      padding: 36px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+
+    .gate-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--danger-bg);
+      color: var(--danger);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin-bottom: 16px;
+    }
+
+    /* Cards & Layout */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px 24px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .step-badge {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+
+    /* Source Selector Grid */
+    .source-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 860px) {
+      .source-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .source-box {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      background: #fafbfc;
+    }
+
+    .source-box h4 {
+      font-size: 14px;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-family: inherit;
+      color: var(--text);
+      background: #fff;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.12);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-dark);
+    }
+
+    .btn-outline {
+      background: #fff;
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    .btn-outline:hover:not(:disabled) {
+      background: #f1f3f4;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #fff;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #0d5324;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: #9c1917;
+    }
+
+    /* KPI Summary Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .stat-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .stat-card.valid .stat-value { color: var(--success); }
+    .stat-card.invalid .stat-value { color: var(--danger); }
+    .stat-card.vetted .stat-value { color: var(--primary); }
+
+    /* Progress Bar */
+    .progress-wrapper {
+      margin: 14px 0;
+      background: #f1f3f4;
+      border-radius: 999px;
+      height: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      background: linear-gradient(90deg, #1a73e8, #34a853);
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* Export Toolbar */
+    .export-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 14px 16px;
+      background: #f8fafd;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 16px;
+    }
+
+    .export-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* Table */
+    .table-container {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow-x: auto;
+      max-height: 560px;
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #f1f3f4;
+      color: var(--text);
+      font-weight: 700;
+      text-align: left;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      z-index: 5;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #eceff1;
+      transition: background 0.12s;
+      cursor: pointer;
+    }
+
+    tbody tr:hover {
+      background: #f4f8fe;
+    }
+
+    tbody td {
+      padding: 10px 14px;
+      vertical-align: middle;
+    }
+
+    .email-link {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .email-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Status Icons & Animations */
+    .status-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid #d2e3fc;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .icon-badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .icon-valid {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid #a8dab5;
+    }
+
+    .icon-invalid {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid #f6aea9;
+    }
+
+    .icon-pending {
+      background: var(--primary-light);
+      color: var(--primary);
+      border: 1px solid #AECBFA;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tag-green { background: var(--success-bg); color: var(--success); }
+    .tag-red { background: var(--danger-bg); color: var(--danger); }
+    .tag-blue { background: var(--primary-light); color: var(--primary); }
+    .tag-amber { background: var(--warning-bg); color: var(--warning); }
+
+    /* Modal Popup */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(32, 33, 36, 0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #fff;
+      border-radius: 14px;
+      max-width: 560px;
+      width: 100%;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+      overflow: hidden;
+      animation: popIn 0.16s ease-out;
+    }
+
+    @keyframes popIn {
+      from { transform: scale(0.95); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .modal-header {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      cursor: pointer;
+      color: var(--text-muted);
+      line-height: 1;
+    }
+
+    .modal-body {
+      padding: 20px 22px;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      row-gap: 11px;
+      column-gap: 12px;
+      font-size: 13.5px;
+    }
+
+    .detail-label {
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .detail-val {
+      color: var(--text);
+      font-weight: 500;
+      word-break: break-word;
+    }
+
+    .modal-footer {
+      padding: 14px 22px;
+      background: #f8fafd;
+      border-top: 1px solid var(--border);
+      text-align: right;
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .filter-tab {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .filter-tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <!-- Top Navbar -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-icon">T</div>
+      <div>
+        <div class="brand-title">Tirwin Email List Validator</div>
+        <div class="brand-subtitle">Zero-Notification Domain &amp; User Mailbox Verification Portal</div>
+      </div>
+    </div>
+    <div id="authBadge" class="auth-pill">
+      <span>Checking session...</span>
+    </div>
+  </header>
+
+  <!-- Unauthorized Screen (Shown if user is not @tirwin.in) -->
+  <div id="unauthorizedView" class="container" style="display: none;">
+    <div class="gate-card">
+      <div class="gate-icon">&#128274;</div>
+      <h2 style="margin-bottom: 10px;">Restricted to @<?= allowedDomain ?> Accounts</h2>
+      <p id="unauthorizedReason" style="color: var(--text-muted); margin-bottom: 20px; font-size: 14.5px;"></p>
+      <div style="background: #f8fafd; border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-size: 13px; color: var(--text-muted); text-align: left;">
+        <strong>Security Policy:</strong> This application is restricted exclusively to authorized <code>@<?= allowedDomain ?></code> Google Workspace users. Please switch to your <code>@<?= allowedDomain ?></code> account in Google Chrome and reload this page.
+      </div>
+    </div>
+  </div>
+
+  <!-- Authorized Application View -->
+  <main id="authorizedView" class="container" style="display: none;">
+
+    <!-- Step 1: Select or Import Email List from Google Docs / Sheets -->
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="step-badge">STEP 1</span>
+          <span>Import Email List from Google Docs or Sheets</span>
+        </div>
+        <div style="font-size: 12.5px; color: var(--text-muted);">
+          Batch Size: <strong>100 emails/batch</strong> &bull; Zero emails sent to recipients
+        </div>
+      </div>
+
+      <div class="source-grid">
+        <!-- Left: Pick from Google Drive Docs/Sheets or Paste URL -->
+        <div class="source-box">
+          <h4>Option A: Select any Google Doc / Google Sheet from Drive</h4>
+          <div class="input-row">
+            <input type="text" id="driveSearchInput" placeholder="Search your Google Docs or Sheets by title..." />
+            <button class="btn btn-outline" id="btnSearchDrive" onclick="loadDriveDocuments()">Search Drive</button>
+          </div>
+
+          <div class="input-row">
+            <select id="driveFileSelect">
+              <option value="">-- Loading recent Google Docs &amp; Sheets... --</option>
+            </select>
+            <button class="btn btn-primary" id="btnLoadSelectedDoc" onclick="importFromSelectedDriveDoc()">Load from Selected Doc</button>
+          </div>
+
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
+            <h4 style="margin-bottom: 8px;">Or Paste any Google Doc / Google Sheet URL or File ID</h4>
+            <div class="input-row" style="margin-bottom: 0;">
+              <input type="text" id="docUrlInput" placeholder="https://docs.google.com/document/d/... or File ID" />
+              <button class="btn btn-outline" id="btnLoadUrlDoc" onclick="importFromUrlOrId()">Import URL / ID</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Paste / Edit Email List directly from a Google Doc -->
+        <div class="source-box">
+          <h4>Option B: Paste Email List Directly from Any Google Doc</h4>
+          <textarea id="rawPasteInput" rows="5" placeholder="Paste email IDs copied from any Google Doc (one per line or comma-separated)..."></textarea>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+            <span style="font-size: 12px; color: var(--text-muted);">Automatically sorts, checks format, whitespace &amp; special chars</span>
+            <button class="btn btn-primary" onclick="importFromPastedText()">Sort &amp; Run Initial Vetting</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2 & 3: Initial Vetting Results, Batch Verification Controls & Export Bar -->
+    <section id="resultsSection" class="card" style="display: none;">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="step-badge">STEP 2 &amp; 3</span>
+          <span id="sourceTitleDisplay">Sorted &amp; Vetted Email List</span>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="btnStartDeepValidation" onclick="startBatchDomainAndUserValidation()">
+            &#9654; Start Domain &amp; User Validation (Batches of 100)
+          </button>
+        </div>
+      </div>
+
+      <!-- Summary Counters -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">Total Sorted Emails</span>
+          <span class="stat-value" id="statTotal">0</span>
+        </div>
+        <div class="stat-card vetted">
+          <span class="stat-label">Passed Initial Vetting</span>
+          <span class="stat-value" id="statBasicPassed">0</span>
+        </div>
+        <div class="stat-card invalid">
+          <span class="stat-label">Basic Format / Char Errors</span>
+          <span class="stat-value" id="statBasicFailed">0</span>
+        </div>
+        <div class="stat-card valid">
+          <span class="stat-label">Verified Active Users (&#10004;)</span>
+          <span class="stat-value" id="statVerifiedValid">0</span>
+        </div>
+        <div class="stat-card invalid">
+          <span class="stat-label">Invalid / Inactive Users (&#10008;)</span>
+          <span class="stat-value" id="statVerifiedInvalid">0</span>
+        </div>
+      </div>
+
+      <!-- Progress Bar -->
+      <div id="batchProgressBox" style="margin-bottom: 18px;">
+        <div class="progress-wrapper">
+          <div class="progress-fill" id="progressBarFill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="progressStatusText">Initial vetting completed. Click "Start Domain &amp; User Validation" to verify mailboxes in batches of 100.</span>
+          <span id="progressPercentText">0%</span>
+        </div>
+      </div>
+
+      <!-- Export Toolbar (Enabled once all email IDs are processed) -->
+      <div class="export-bar">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <strong style="font-size: 13.5px;">Export Format:</strong>
+          <select id="exportFormatSelect" style="width: 170px;" disabled>
+            <option value="csv">CSV (.csv)</option>
+            <option value="excel">Excel (.xlsx)</option>
+            <option value="pdf">PDF Document (.pdf)</option>
+          </select>
+          <span id="exportReadyHint" style="font-size: 12.5px; color: var(--text-muted);">
+            (Export buttons unlock automatically once all email IDs finish processing)
+          </span>
+        </div>
+
+        <div class="export-actions">
+          <button class="btn btn-primary" id="btnExportAll" onclick="exportEmailList('ALL')" disabled>
+            &#11015; Export All
+          </button>
+          <button class="btn btn-success" id="btnExportValid" onclick="exportEmailList('VALID')" disabled>
+            &#10004; Export Only Valid Emails
+          </button>
+          <button class="btn btn-danger" id="btnExportInvalid" onclick="exportEmailList('INVALID')" disabled>
+            &#10008; Export Only Invalid Emails
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter & Search Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+        <div class="filter-tabs">
+          <button class="filter-tab active" id="tabALL" onclick="setTableFilter('ALL')">All Emails</button>
+          <button class="filter-tab" id="tabVALID" onclick="setTableFilter('VALID')">Valid &amp; Active (&#10004;)</button>
+          <button class="filter-tab" id="tabINVALID" onclick="setTableFilter('INVALID')">Invalid / Failed (&#10008;)</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12.5px; color: var(--text-muted);">Click any email ID row for full diagnostic popup</span>
+          <input type="text" id="tableSearchInput" placeholder="Filter table..." style="width: 220px;" oninput="renderEmailTable()" />
+        </div>
+      </div>
+
+      <!-- Vetted & Validated Email List Table -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 55px;">#</th>
+              <th style="width: 65px;">Status</th>
+              <th>Email ID (Sorted A–Z)</th>
+              <th>Initial Vetting (Format / Spaces / Special Chars)</th>
+              <th>Domain MX Status</th>
+              <th>User Active in Domain</th>
+              <th>Verification Summary</th>
+            </tr>
+          </thead>
+          <tbody id="emailTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Detailed Popup Modal when clicking an Email ID -->
+  <div id="detailModalBackdrop" class="modal-backdrop" onclick="closeDetailModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title" id="modalEmailTitle">user@example.com</div>
+        <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBodyContent"></div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeDetailModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Server-injected auth payload
+    const INITIAL_AUTH = <?!= authJson ?>;
+    const BATCH_SIZE = 100;
+
+    // Master state array of email item objects
+    let emailRecords = [];
+    let currentFilter = 'ALL';
+    let isBatchProcessing = false;
+    let allProcessed = false;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initSession();
+    });
+
+    function initSession() {
+      const badge = document.getElementById('authBadge');
+      if (!INITIAL_AUTH || !INITIAL_AUTH.authorized) {
+        badge.className = 'auth-pill unauthorized';
+        badge.innerHTML = '&#128274; Unauthorized Access';
+        document.getElementById('unauthorizedView').style.display = 'block';
+        document.getElementById('unauthorizedReason').textContent =
+          (INITIAL_AUTH && INITIAL_AUTH.reason) || 'Access restricted to @tirwin.in domain accounts.';
+        return;
+      }
+
+      badge.className = 'auth-pill';
+      badge.innerHTML = '&#128994; ' + escapeHtml(INITIAL_AUTH.email) + ' (@' + escapeHtml(INITIAL_AUTH.domain) + ')';
+      document.getElementById('authorizedView').style.display = 'block';
+      loadDriveDocuments();
+    }
+
+    /**
+     * Loads recent Google Docs & Sheets from the user's Google Drive.
+     */
+    function loadDriveDocuments() {
+      const query = document.getElementById('driveSearchInput').value.trim();
+      const select = document.getElementById('driveFileSelect');
+      const btn = document.getElementById('btnSearchDrive');
+      select.innerHTML = '<option value="">Loading documents from Google Drive...</option>';
+      btn.disabled = true;
+
+      if (typeof google === 'undefined' || !google.script) {
+        select.innerHTML = '<option value="">(Preview Mode - Deploy as Apps Script Web App to list Drive Docs)</option>';
+        btn.disabled = false;
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(files => {
+          btn.disabled = false;
+          if (!files || files.length === 0) {
+            select.innerHTML = '<option value="">No matching Google Docs or Sheets found</option>';
+            return;
+          }
+          select.innerHTML = files
+            .map(f => `<option value="${escapeHtml(f.id)}">[${escapeHtml(f.type)}] ${escapeHtml(f.name)} (Updated: ${escapeHtml(f.updated)})</option>`)
+            .join('');
+        })
+        .withFailureHandler(err => {
+          btn.disabled = false;
+          select.innerHTML = '<option value="">Error loading Drive files</option>';
+          alert('Error loading Google Docs: ' + err.message);
+        })
+        .listRecentUserDocsAndSheets(query);
+    }
+
+    /**
+     * Extracts emails from the selected Google Doc/Sheet in the dropdown.
+     */
+    function importFromSelectedDriveDoc() {
+      const fileId = document.getElementById('driveFileSelect').value;
+      if (!fileId) {
+        alert('Please select a Google Doc or Sheet from the dropdown first.');
+        return;
+      }
+      fetchEmailsFromBackendDoc(fileId, 'btnLoadSelectedDoc');
+    }
+
+    /**
+     * Extracts emails from a pasted Google Doc / Sheet URL or ID.
+     */
+    function importFromUrlOrId() {
+      const urlOrId = document.getElementById('docUrlInput').value.trim();
+      if (!urlOrId) {
+        alert('Please paste a Google Doc or Google Sheet URL or File ID.');
+        return;
+      }
+      fetchEmailsFromBackendDoc(urlOrId, 'btnLoadUrlDoc');
+    }
+
+    function fetchEmailsFromBackendDoc(urlOrId, buttonId) {
+      if (isBatchProcessing) {
+        alert('Batch validation is currently in progress. Please wait for it to finish.');
+        return;
+      }
+      const btn = document.getElementById(buttonId);
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Reading Document...';
+
+      google.script.run
+        .withSuccessHandler(res => {
+          btn.disabled = false;
+          btn.textContent = originalText;
+          if (!res || !res.rawCandidates || res.rawCandidates.length === 0) {
+            alert(`No email addresses were found in "${res ? res.fileName : 'document'}".`);
+            return;
+          }
+          processInitialSortingAndBasicVetting(
+            res.rawCandidates,
+            `${res.fileType}: "${res.fileName}" (${res.totalExtracted} extracted)`
+          );
+        })
+        .withFailureHandler(err => {
+          btn.disabled = false;
+          btn.textContent = originalText;
+          alert('Failed to extract emails from document: ' + err.message);
+        })
+        .extractEmailsFromGoogleDocOrSheet(urlOrId);
+    }
+
+    /**
+     * Imports emails pasted into the textarea.
+     */
+    function importFromPastedText() {
+      if (isBatchProcessing) {
+        alert('Batch validation is currently in progress.');
+        return;
+      }
+      const raw = document.getElementById('rawPasteInput').value;
+      if (!raw || raw.trim() === '') {
+        alert('Please paste one or more email addresses first.');
+        return;
+      }
+      const lines = raw
+        .split(/[\r\n,;|\t]+/)
+        .map(s => s.replace(/^[\s•*\-–—>]+(?=\S)/, ''))
+        .filter(s => s.trim() !== '');
+
+      if (lines.length === 0) {
+        alert('No email entries found in pasted text.');
+        return;
+      }
+      processInitialSortingAndBasicVetting(lines, `Pasted Document List (${lines.length} entries)`);
+    }
+
+    /**
+     * Performs client-side sorting + comprehensive basic validations:
+     * - Whitespace checks (leading, trailing, or internal spaces)
+     * - Special character checks & ASCII control characters
+     * - "@" symbol count, local part rules, domain dot & TLD structure
+     * - Duplicate elimination (case-insensitive)
+     * Displays the initial vetted list in the UI before batch domain/user validation begins.
+     */
+    function processInitialSortingAndBasicVetting(rawList, sourceLabel) {
+      allProcessed = false;
+      setExportButtonsEnabled(false);
+
+      // 1. Sort alphabetically (case-insensitive by trimmed value)
+      const sortedRaw = [...rawList].sort((a, b) =>
+        String(a).trim().toLowerCase().localeCompare(String(b).trim().toLowerCase())
+      );
+
+      // 2. Deduplicate exact trimmed lowercase matches while keeping track of duplicates
+      const seen = new Set();
+      const records = [];
+
+      for (let i = 0; i < sortedRaw.length; i++) {
+        const rawEntry = String(sortedRaw[i]);
+        const trimmedEntry = rawEntry.trim();
+        if (!trimmedEntry) continue;
+
+        const key = trimmedEntry.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const vetting = runBasicEmailVetting(rawEntry);
+
+        records.push({
+          index: records.length + 1,
+          rawEmail: rawEntry,
+          email: trimmedEntry,
+          basicValid: vetting.isValid,
+          basicIssues: vetting.issues,
+          basicChecks: vetting.checks,
+          // State: 'BASIC_PASSED' | 'BASIC_FAILED' | 'IN_PROGRESS' | 'VALID' | 'INVALID'
+          state: vetting.isValid ? 'BASIC_PASSED' : 'BASIC_FAILED',
+          domainValid: null,
+          userActive: vetting.isValid ? 'Pending Batch Check' : 'Skipped (Failed Basic Vetting)',
+          primaryMx: '—',
+          mxRecords: [],
+          method: vetting.isValid ? 'Initial Basic Vetting' : 'Basic Format Filter',
+          isDisposable: false,
+          status: vetting.isValid ? 'Initial Vetting Passed (Ready for Domain/User Check)' : 'Invalid Format / Special Chars',
+          reason: vetting.isValid
+            ? 'Passed format, whitespace, and special character checks. Ready for batch domain & user verification.'
+            : 'Failed initial vetting: ' + vetting.issues.join('; '),
+          checkedAt: new Date().toLocaleString()
+        });
+      }
+
+      emailRecords = records;
+      document.getElementById('sourceTitleDisplay').textContent = `Sorted & Vetted List — ${sourceLabel}`;
+      document.getElementById('resultsSection').style.display = 'block';
+
+      updateStatsAndProgress(0, records.filter(r => r.basicValid).length);
+      renderEmailTable();
+
+      // If every single email failed basic vetting, mark all processed immediately
+      const basicPassedCount = records.filter(r => r.basicValid).length;
+      if (basicPassedCount === 0 && records.length > 0) {
+        allProcessed = true;
+        setExportButtonsEnabled(true);
+        document.getElementById('progressStatusText').textContent =
+          'All entries failed initial basic format/character vetting. Exports are unlocked.';
+      } else {
+        document.getElementById('btnStartDeepValidation').disabled = false;
+        document.getElementById('progressStatusText').textContent =
+          `Initial vetting complete (${basicPassedCount} passed, ${records.length - basicPassedCount} failed basic format/whitespace checks). Click "Start Domain & User Validation" to verify in batches of 100.`;
+      }
+    }
+
+    /**
+     * Runs granular basic validations on an email entry:
+     * 1. Leading / trailing whitespace check
+     * 2. Internal whitespace check
+     * 3. Disallowed special characters check
+     * 4. @ symbol & local/domain structure check
+     */
+    function runBasicEmailVetting(rawEmail) {
+      const issues = [];
+      const hasLeadingOrTrailingSpace = rawEmail !== rawEmail.trim();
+      const trimmed = rawEmail.trim();
+      const hasInternalWhitespace = /\s/.test(trimmed);
+
+      if (hasLeadingOrTrailingSpace) {
+        issues.push('Leading or trailing whitespace detected');
+      }
+      if (hasInternalWhitespace) {
+        issues.push('Contains internal spaces/whitespace');
+      }
+
+      const atParts = trimmed.split('@');
+      const hasSingleAt = atParts.length === 2 && atParts[0].length > 0 && atParts[1].length > 0;
+      if (!hasSingleAt) {
+        issues.push(atParts.length < 2 ? 'Missing "@" symbol' : 'Multiple "@" symbols or empty username/domain');
+      }
+
+      let hasInvalidSpecialChars = false;
+      let hasDotAnomaly = false;
+      let hasValidDomainFormat = false;
+
+      if (hasSingleAt) {
+        const local = atParts[0];
+        const domain = atParts[1];
+
+        // Check local part for invalid special characters
+        if (!/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) {
+          hasInvalidSpecialChars = true;
+          issues.push('Disallowed special characters in username part');
+        }
+
+        // Check domain part for invalid special characters
+        if (!/^[a-zA-Z0-9.-]+$/.test(domain)) {
+          hasInvalidSpecialChars = true;
+          issues.push('Disallowed special characters in domain name');
+        }
+
+        if (
+          local.startsWith('.') ||
+          local.endsWith('.') ||
+          local.includes('..') ||
+          domain.startsWith('.') ||
+          domain.endsWith('.') ||
+          domain.includes('..')
+        ) {
+          hasDotAnomaly = true;
+          issues.push('Invalid leading, trailing, or consecutive dots (..)');
+        }
+
+        const domainRegex = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+        const tld = domain.split('.').pop() || '';
+        hasValidDomainFormat = domainRegex.test(domain) && tld.length >= 2 && !/^\d+$/.test(tld);
+
+        if (!hasValidDomainFormat) {
+          issues.push('Invalid domain structure or top-level domain (TLD)');
+        }
+      }
+
+      return {
+        isValid: issues.length === 0,
+        issues: issues,
+        checks: {
+          noWhitespace: !hasLeadingOrTrailingSpace && !hasInternalWhitespace,
+          noInvalidSpecialChars: !hasInvalidSpecialChars,
+          validAtAndDots: hasSingleAt && !hasDotAnomaly,
+          validDomainSyntax: hasValidDomainFormat
+        }
+      };
+    }
+
+    /**
+     * Sequentially processes all emails that passed initial vetting in batches of 100.
+     * Shows an in-progress spinner animation on the current batch and updates each row
+     * with a green tick or red wrong icon as batches complete.
+     */
+    async function startBatchDomainAndUserValidation() {
+      if (isBatchProcessing) return;
+
+      const candidates = emailRecords.filter(r => r.basicValid);
+      if (candidates.length === 0) {
+        alert('No emails passed initial basic vetting to validate.');
+        return;
+      }
+
+      isBatchProcessing = true;
+      allProcessed = false;
+      setExportButtonsEnabled(false);
+
+      const startBtn = document.getElementById('btnStartDeepValidation');
+      startBtn.disabled = true;
+      startBtn.textContent = 'Validating Batches of 100...';
+
+      // Mark all basic-failed records as finalized INVALID immediately
+      emailRecords.forEach(r => {
+        if (!r.basicValid) {
+          r.state = 'INVALID';
+        }
+      });
+
+      const totalBatches = Math.ceil(candidates.length / BATCH_SIZE);
+      let completedCount = 0;
+
+      for (let b = 0; b < totalBatches; b++) {
+        const batchSlice = candidates.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+
+        // Set in-progress spinner animation on every email in this batch
+        batchSlice.forEach(item => {
+          item.state = 'IN_PROGRESS';
+          item.status = `Verifying Domain & User (Batch ${b + 1}/${totalBatches})...`;
+        });
+        document.getElementById('progressStatusText').textContent =
+          `Processing Batch ${b + 1} of ${totalBatches} (${batchSlice.length} email IDs)...`;
+        renderEmailTable();
+
+        const batchEmails = batchSlice.map(item => item.email);
+
+        try {
+          const batchResults = await callValidateBatchRpc(batchEmails, b + 1, totalBatches);
+          const resultMap = {};
+          (batchResults || []).forEach(res => {
+            resultMap[String(res.email).toLowerCase()] = res;
+          });
+
+          batchSlice.forEach(item => {
+            const res = resultMap[item.email.toLowerCase()];
+            if (res) {
+              item.domainValid = res.domainValid;
+              item.userActive = res.userActive;
+              item.primaryMx = res.primaryMx;
+              item.mxRecords = res.mxRecords || [];
+              item.method = res.method;
+              item.isDisposable = res.isDisposable;
+              item.status = res.status;
+              item.reason = res.reason;
+              item.checkedAt = res.checkedAt;
+              item.elapsedMs = res.elapsedMs;
+              item.state = res.isActive ? 'VALID' : 'INVALID';
+            } else {
+              item.state = 'INVALID';
+              item.status = 'Validation Error';
+              item.reason = 'No response returned for this email address';
+            }
+          });
+        } catch (err) {
+          batchSlice.forEach(item => {
+            item.state = 'INVALID';
+            item.status = 'Batch RPC Error';
+            item.reason = err.message || 'Server error during batch validation';
+          });
+        }
+
+        completedCount += batchSlice.length;
+        updateStatsAndProgress(completedCount, candidates.length);
+        renderEmailTable();
+      }
+
+      isBatchProcessing = false;
+      allProcessed = true;
+      startBtn.disabled = false;
+      startBtn.textContent = '↻ Re-Run Domain & User Validation';
+
+      setExportButtonsEnabled(true);
+      document.getElementById('progressStatusText').textContent =
+        `Completed all ${emailRecords.length} email ID(s) across ${totalBatches} batch(es). Export buttons are now enabled.`;
+
+      // Also log the completed run to a new timestamped Google Sheet in the background
+      if (typeof google !== 'undefined' && google.script) {
+        google.script.run
+          .withSuccessHandler(sheetInfo => {
+            if (sheetInfo && sheetInfo.loggedToSheet) {
+              document.getElementById('progressStatusText').textContent +=
+                ` (Logged to sheet: ${sheetInfo.sheetName})`;
+            }
+          })
+          .saveValidationRunToTimestampedSheet(
+            emailRecords.map(r => ({
+              email: r.email,
+              status: r.status,
+              isActive: r.state === 'VALID',
+              basicValid: r.basicValid,
+              domainValid: Boolean(r.domainValid),
+              userActive: r.userActive,
+              method: r.method,
+              isDisposable: r.isDisposable,
+              primaryMx: r.primaryMx,
+              reason: r.reason,
+              checkedAt: r.checkedAt
+            }))
+          );
+      }
+    }
+
+    /**
+     * Promisified wrapper around google.script.run.validateEmailBatchWeb
+     */
+    function callValidateBatchRpc(batchEmails, batchNum, totalBatches) {
+      return new Promise((resolve, reject) => {
+        if (typeof google === 'undefined' || !google.script) {
+          // Local fallback simulation if opened outside Apps Script container
+          setTimeout(() => {
+            resolve(
+              batchEmails.map(em => ({
+                email: em,
+                status: 'Active',
+                isActive: true,
+                domainValid: true,
+                userActive: 'Yes',
+                method: 'Preview Mode',
+                syntaxValid: true,
+                isDisposable: false,
+                primaryMx: 'mx.google.com',
+                mxRecords: ['10 mx.google.com'],
+                reason: 'Preview simulation',
+                checkedAt: new Date().toLocaleString(),
+                elapsedMs: 120
+              }))
+            );
+          }, 600);
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(res => resolve(res))
+          .withFailureHandler(err => reject(err))
+          .validateEmailBatchWeb(batchEmails, batchNum, totalBatches);
+      });
+    }
+
+    function updateStatsAndProgress(completedDeepCount, totalDeepCandidates) {
+      const total = emailRecords.length;
+      const basicPassed = emailRecords.filter(r => r.basicValid).length;
+      const basicFailed = total - basicPassed;
+      const validCount = emailRecords.filter(r => r.state === 'VALID').length;
+      const invalidCount = emailRecords.filter(r => r.state === 'INVALID' || r.state === 'BASIC_FAILED').length;
+
+      document.getElementById('statTotal').textContent = total;
+      document.getElementById('statBasicPassed').textContent = basicPassed;
+      document.getElementById('statBasicFailed').textContent = basicFailed;
+      document.getElementById('statVerifiedValid').textContent = validCount;
+      document.getElementById('statVerifiedInvalid').textContent = invalidCount;
+
+      const pct = totalDeepCandidates > 0
+        ? Math.round((completedDeepCount / totalDeepCandidates) * 100)
+        : (total > 0 ? 100 : 0);
+
+      document.getElementById('progressBarFill').style.width = pct + '%';
+      document.getElementById('progressPercentText').textContent = pct + '%';
+    }
+
+    function setExportButtonsEnabled(enabled) {
+      document.getElementById('exportFormatSelect').disabled = !enabled;
+      document.getElementById('btnExportAll').disabled = !enabled;
+      document.getElementById('btnExportValid').disabled = !enabled;
+      document.getElementById('btnExportInvalid').disabled = !enabled;
+      document.getElementById('exportReadyHint').textContent = enabled
+        ? 'All email IDs processed — Ready to export as CSV, Excel, or PDF.'
+        : '(Export buttons unlock automatically once all email IDs finish processing)';
+    }
+
+    function setTableFilter(filterType) {
+      currentFilter = filterType;
+      ['ALL', 'VALID', 'INVALID'].forEach(t => {
+        const el = document.getElementById('tab' + t);
+        if (el) el.classList.toggle('active', t === filterType);
+      });
+      renderEmailTable();
+    }
+
+    /**
+     * Renders the email table with in-progress animations, green tick icons, or red wrong icons.
+     */
+    function renderEmailTable() {
+      const tbody = document.getElementById('emailTableBody');
+      const search = (document.getElementById('tableSearchInput').value || '').trim().toLowerCase();
+
+      const filtered = emailRecords.filter(r => {
+        if (currentFilter === 'VALID' && r.state !== 'VALID') return false;
+        if (currentFilter === 'INVALID' && r.state !== 'INVALID' && r.state !== 'BASIC_FAILED') return false;
+        if (search && !r.email.toLowerCase().includes(search) && !String(r.status).toLowerCase().includes(search)) {
+          return false;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 28px; color: var(--text-muted);">No matching email IDs found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered
+        .map(r => {
+          let statusIconHtml = '';
+          if (r.state === 'IN_PROGRESS') {
+            statusIconHtml = `<span class="spinner" title="Validating Domain & User..."></span>`;
+          } else if (r.state === 'VALID') {
+            statusIconHtml = `<span class="icon-badge icon-valid" title="Valid & Active">&#10004;</span>`;
+          } else if (r.state === 'INVALID' || r.state === 'BASIC_FAILED') {
+            statusIconHtml = `<span class="icon-badge icon-invalid" title="Invalid / Inactive">&#10008;</span>`;
+          } else {
+            statusIconHtml = `<span class="icon-badge icon-pending" title="Passed Initial Vetting - Pending Batch Check">&#8987;</span>`;
+          }
+
+          const basicTag = r.basicValid
+            ? `<span class="tag tag-green">&#10004; Passed Format &amp; Chars</span>`
+            : `<span class="tag tag-red">&#10008; ${escapeHtml(r.basicIssues[0] || 'Format Error')}</span>`;
+
+          let domainTag = '<span style="color: var(--text-muted);">Pending</span>';
+          if (r.state === 'IN_PROGRESS') {
+            domainTag = '<span class="tag tag-blue">Checking DNS MX...</span>';
+          } else if (r.domainValid === true) {
+            domainTag = `<span class="tag tag-green">&#10004; Valid (${escapeHtml(r.primaryMx)})</span>`;
+          } else if (r.domainValid === false) {
+            domainTag = `<span class="tag tag-red">&#10008; Invalid Domain</span>`;
+          }
+
+          let userTag = `<span style="color: var(--text-muted);">${escapeHtml(r.userActive)}</span>`;
+          if (r.state === 'IN_PROGRESS') {
+            userTag = '<span class="tag tag-blue">Probing User...</span>';
+          } else if (r.userActive === 'Yes') {
+            userTag = '<span class="tag tag-green">&#10004; Active User</span>';
+          } else if (String(r.userActive).startsWith('No')) {
+            userTag = `<span class="tag tag-red">&#10008; ${escapeHtml(r.userActive)}</span>`;
+          } else if (String(r.userActive).includes('Unverified')) {
+            userTag = `<span class="tag tag-amber">&#9888; ${escapeHtml(r.userActive)}</span>`;
+          }
+
+          return `
+            <tr onclick="openEmailDetailModal(${r.index - 1})">
+              <td>${r.index}</td>
+              <td><div class="status-cell">${statusIconHtml}</div></td>
+              <td>
+                <span class="email-link">${escapeHtml(r.rawEmail)}</span>
+              </td>
+              <td>${basicTag}</td>
+              <td>${domainTag}</td>
+              <td>${userTag}</td>
+              <td style="font-size: 12.5px; color: var(--text-muted);">${escapeHtml(r.reason)}</td>
+            </tr>
+          `;
+        })
+        .join('');
+    }
+
+    /**
+     * Opens the diagnostic popup modal when the user clicks on any email ID row.
+     */
+    function openEmailDetailModal(recordIdx) {
+      const r = emailRecords[recordIdx];
+      if (!r) return;
+
+      document.getElementById('modalEmailTitle').innerHTML =
+        (r.state === 'VALID'
+          ? '<span class="icon-badge icon-valid" style="margin-right:8px;">&#10004;</span>'
+          : '<span class="icon-badge icon-invalid" style="margin-right:8px;">&#10008;</span>') +
+        escapeHtml(r.rawEmail);
+
+      const checks = r.basicChecks || {};
+      const basicDetailsHtml = r.basicValid
+        ? '<span class="tag tag-green">&#10004; Passed All Initial Format, Whitespace &amp; Special Char Checks</span>'
+        : `<span class="tag tag-red">&#10008; Failed: ${escapeHtml(r.basicIssues.join(', '))}</span>`;
+
+      document.getElementById('modalBodyContent').innerHTML = `
+        <div class="detail-grid">
+          <div class="detail-label">Raw Input Entry:</div>
+          <div class="detail-val"><code>${escapeHtml(r.rawEmail)}</code></div>
+
+          <div class="detail-label">Normalized Email:</div>
+          <div class="detail-val"><strong>${escapeHtml(r.email)}</strong></div>
+
+          <div class="detail-label">Overall Status:</div>
+          <div class="detail-val">${escapeHtml(r.status)}</div>
+
+          <div class="detail-label">Initial Basic Vetting:</div>
+          <div class="detail-val">${basicDetailsHtml}</div>
+
+          <div class="detail-label">Whitespace Check:</div>
+          <div class="detail-val">${checks.noWhitespace ? '&#10004; Clean (No leading/trailing/internal spaces)' : '&#10008; Contains invalid whitespace'}</div>
+
+          <div class="detail-label">Special Characters:</div>
+          <div class="detail-val">${checks.noInvalidSpecialChars ? '&#10004; Valid RFC 5322 characters' : '&#10008; Contains disallowed special characters'}</div>
+
+          <div class="detail-label">Domain MX Valid:</div>
+          <div class="detail-val">${r.domainValid === true ? '&#10004; Yes' : (r.domainValid === false ? '&#10008; No' : 'Not Checked')}</div>
+
+          <div class="detail-label">Primary Mail Server:</div>
+          <div class="detail-val"><code>${escapeHtml(r.primaryMx || 'N/A')}</code></div>
+
+          <div class="detail-label">User Active in Domain:</div>
+          <div class="detail-val"><strong>${escapeHtml(r.userActive)}</strong></div>
+
+          <div class="detail-label">Verification Method:</div>
+          <div class="detail-val">${escapeHtml(r.method)}</div>
+
+          <div class="detail-label">Disposable Domain:</div>
+          <div class="detail-val">${r.isDisposable ? 'Yes (Temporary Mail Provider)' : 'No'}</div>
+
+          <div class="detail-label">Detailed Diagnostic:</div>
+          <div class="detail-val">${escapeHtml(r.reason)}</div>
+
+          <div class="detail-label">Timestamp:</div>
+          <div class="detail-val">${escapeHtml(r.checkedAt)}</div>
+        </div>
+      `;
+
+      document.getElementById('detailModalBackdrop').classList.add('open');
+    }
+
+    function closeDetailModal() {
+      document.getElementById('detailModalBackdrop').classList.remove('open');
+    }
+
+    /**
+     * Exports All, Only Valid, or Only Invalid emails in the chosen format (CSV, Excel .xlsx, or PDF).
+     */
+    function exportEmailList(scope) {
+      if (!allProcessed) {
+        alert('Please wait until all email IDs finish processing before exporting.');
+        return;
+      }
+
+      const format = document.getElementById('exportFormatSelect').value;
+      let targetRecords = [];
+      let label = 'All_Emails';
+
+      if (scope === 'VALID') {
+        targetRecords = emailRecords.filter(r => r.state === 'VALID');
+        label = 'Valid_Emails_Only';
+      } else if (scope === 'INVALID') {
+        targetRecords = emailRecords.filter(r => r.state !== 'VALID');
+        label = 'Invalid_Emails_Only';
+      } else {
+        targetRecords = [...emailRecords];
+        label = 'All_Validated_Emails';
+      }
+
+      if (targetRecords.length === 0) {
+        alert(`No records found for "${label.replace(/_/g, ' ')}".`);
+        return;
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const baseFileName = `Tirwin_${label}_${timestamp}`;
+
+      const rows = targetRecords.map((r, idx) => ({
+        '#': idx + 1,
+        'Email ID': r.email,
+        'Validation Result': r.state === 'VALID' ? 'Valid & Active' : 'Invalid / Inactive',
+        'Basic Format Vetting': r.basicValid ? 'Passed' : 'Failed (' + r.basicIssues.join('; ') + ')',
+        'Domain Valid': r.domainValid ? 'Yes' : 'No',
+        'User Active in Domain': r.userActive,
+        'Verification Method': r.method,
+        'Primary MX Server': r.primaryMx,
+        'Diagnostic Details': r.reason,
+        'Validated At': r.checkedAt
+      }));
+
+      if (format === 'csv') {
+        downloadAsCsv(rows, baseFileName + '.csv');
+      } else if (format === 'excel') {
+        downloadAsExcel(rows, baseFileName + '.xlsx', label);
+      } else if (format === 'pdf') {
+        downloadAsPdf(rows, baseFileName + '.pdf', label);
+      }
+    }
+
+    function downloadAsCsv(rows, filename) {
+      const headers = Object.keys(rows[0]);
+      const csvLines = [
+        headers.join(','),
+        ...rows.map(row =>
+          headers
+            .map(h => `"${String(row[h] == null ? '' : row[h]).replace(/"/g, '""')}"`)
+            .join(',')
+        )
+      ];
+      const blob = new Blob([csvLines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadAsExcel(rows, filename, sheetTitle) {
+      if (typeof XLSX === 'undefined') {
+        alert('Excel library still loading. Downloading as CSV instead.');
+        downloadAsCsv(rows, filename.replace(/\.xlsx$/, '.csv'));
+        return;
+      }
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetTitle.slice(0, 31));
+      XLSX.writeFile(workbook, filename);
+    }
+
+    function downloadAsPdf(rows, filename, reportLabel) {
+      if (typeof window.jspdf === 'undefined') {
+        alert('PDF library still loading. Please try again in a moment.');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+      doc.setFontSize(14);
+      doc.text(`Tirwin Email Validation Report — ${reportLabel.replace(/_/g, ' ')}`, 40, 36);
+      doc.setFontSize(9.5);
+      doc.setTextColor(100);
+      doc.text(
+        `Generated by: ${INITIAL_AUTH.email || 'Authorized User'} | Total Records: ${rows.length} | Generated At: ${new Date().toLocaleString()}`,
+        40,
+        52
+      );
+
+      const tableHeaders = [['#', 'Email ID', 'Result', 'Basic Vetting', 'Domain Valid', 'User Active', 'Primary MX', 'Details']];
+      const tableBody = rows.map(r => [
+        r['#'],
+        r['Email ID'],
+        r['Validation Result'],
+        r['Basic Format Vetting'],
+        r['Domain Valid'],
+        r['User Active in Domain'],
+        r['Primary MX Server'],
+        r['Diagnostic Details']
+      ]);
+
+      doc.autoTable({
+        startY: 64,
+        head: tableHeaders,
+        body: tableBody,
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [26, 115, 232] }
+      });
+
+      doc.save(filename);
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>
